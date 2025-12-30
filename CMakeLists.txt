@@ -4,6 +4,11 @@ SET(CMAKE_DISABLE_SOURCE_CHANGES ON)
 SET(CMAKE_DISABLE_IN_SOURCE_BUILD ON)
 SET(LICENSECC_SHORT_LICENSE "BSD Software License")
 
+# 设置 CMake 策略，使用新的 Boost 查找方式
+if(POLICY CMP0167)
+  cmake_policy(SET CMP0167 NEW)
+endif()
+
 cmake_policy(SET CMP0048 NEW)
 project (lccgen
 	VERSION 2.0.0
@@ -98,11 +103,12 @@ if(WIN32 AND "x${CMAKE_CXX_COMPILER_ARCHITECTURE_ID}" STREQUAL "x")
     message(STATUS "Compiler architecture: ${CMAKE_CXX_COMPILER_ARCHITECTURE_ID}")
 endif()
 
-SET( Boost_USE_STATIC_LIBS ON )
+SET( Boost_USE_STATIC_LIBS OFF )
 find_package(Boost REQUIRED COMPONENTS date_time filesystem program_options system unit_test_framework)
 
-#set below in case of dynamic linking in debug.
-#set_property(DIRECTORY APPEND PROPERTY COMPILE_DEFINITIONS $<$<CONFIG:Debug>:BOOST_TEST_DYN_LINK>)
+# 使用动态链接 Boost 时需要定义此宏
+set_property(DIRECTORY APPEND PROPERTY COMPILE_DEFINITIONS $<$<CONFIG:Debug>:BOOST_TEST_DYN_LINK>)
+set_property(DIRECTORY APPEND PROPERTY COMPILE_DEFINITIONS $<$<CONFIG:Release>:BOOST_TEST_DYN_LINK>)
 add_definitions(-DBOOST_ALL_NO_LIB) #Disable Boost Microsoft magic, all dependencies are handled by cmake
 add_definitions(-DBOOST_LIB_DIAGNOSTIC) #Check it is really disabled
 include_directories(${Boost_INCLUDE_DIRS}) 
