@@ -6,9 +6,20 @@ ADD_LIBRARY(license_generator_lib
 
 if(UNIX OR OPENSSL_FOUND)
 	target_link_libraries(license_generator_lib PUBLIC
-			     ${Boost_LIBRARIES} OpenSSL::Crypto ${EXTERNAL_LIBS} ${CMAKE_DL_LIBS})
+			     Boost::date_time
+			     Boost::filesystem
+			     Boost::program_options
+			     Boost::system
+			     OpenSSL::Crypto
+			     ${EXTERNAL_LIBS}
+			     ${CMAKE_DL_LIBS})
 else(UNIX OR OPENSSL_FOUND) #windows and zlib not found
-	target_link_libraries(license_generator_lib PUBLIC ${Boost_LIBRARIES} ${EXTERNAL_LIBS})
+	target_link_libraries(license_generator_lib PUBLIC
+			     Boost::date_time
+			     Boost::filesystem
+			     Boost::program_options
+			     Boost::system
+			     ${EXTERNAL_LIBS})
 ENDIF(UNIX OR OPENSSL_FOUND)
 
 if(CODE_COVERAGE AND UNIX)

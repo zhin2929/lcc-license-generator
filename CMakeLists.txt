@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.6 FATAL_ERROR)
+﻿cmake_minimum_required(VERSION 3.6 FATAL_ERROR)
 
 SET(CMAKE_DISABLE_SOURCE_CHANGES ON)
 SET(CMAKE_DISABLE_IN_SOURCE_BUILD ON)
@@ -7,6 +7,11 @@ SET(LICENSECC_SHORT_LICENSE "BSD Software License")
 # 设置 CMake 策略，使用新的 Boost 查找方式
 if(POLICY CMP0167)
   cmake_policy(SET CMP0167 NEW)
+endif()
+
+# 启用现代MSVC运行时库选择（CMake 3.15+）
+if(POLICY CMP0091)
+  cmake_policy(SET CMP0091 NEW)
 endif()
 
 cmake_policy(SET CMP0048 NEW)
@@ -27,6 +32,23 @@ IF( ( CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux" ) AND CMAKE_CROSSCOMPILING AND NOT
 ENDIF()
 
 SET ( OPENSSL_USE_STATIC_LIBS ON )
+
+# lccgen: 强制使用 vcpkg 的静态 OpenSSL（x64-windows-static triplet，与 Boost 同路径）
+if(MSVC)
+  # 从 CMAKE_TOOLCHAIN_FILE 推导 vcpkg 根目录
+  if(CMAKE_TOOLCHAIN_FILE AND CMAKE_TOOLCHAIN_FILE MATCHES "vcpkg.cmake")
+    get_filename_component(VCPKG_ROOT_TEMP "${CMAKE_TOOLCHAIN_FILE}" DIRECTORY)
+    get_filename_component(VCPKG_ROOT_TEMP "${VCPKG_ROOT_TEMP}" DIRECTORY)
+    get_filename_component(VCPKG_ROOT_TEMP "${VCPKG_ROOT_TEMP}" DIRECTORY)
+
+    set(OPENSSL_ROOT_DIR "${VCPKG_ROOT_TEMP}/installed/x64-windows-static")
+    message(STATUS "lccgen: Using static OpenSSL from ${OPENSSL_ROOT_DIR}")
+  elseif(EXISTS "E:/vcpkg/installed/x64-windows-static")
+    set(OPENSSL_ROOT_DIR "E:/vcpkg/installed/x64-windows-static")
+    message(STATUS "lccgen: Using static OpenSSL from ${OPENSSL_ROOT_DIR}")
+  endif()
+endif()
+
 find_package(OpenSSL COMPONENTS Crypto QUIET)
 IF(OPENSSL_FOUND)
 	add_definitions(-DHAS_OPENSSL)
@@ -72,15 +94,11 @@ else(UNIX) #windows and linux crosscompiling for windows target
 		include(target_arch)
 		target_architecture( TARGET_ARCHITECTURE )
 		message(STATUS "architecture detected: ${TARGET_ARCHITECTURE}")
-		
-		#Boost > 3.15 handle the /MD flag more nicely than this
-		if(${STATIC_RUNTIME})
-			string(REPLACE "/MD" "/MT" CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE}")
-			string(REPLACE "/MD" "/MT" CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE}")
-			string(REPLACE "/MDd" "/MTd" CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG}")
-			string(REPLACE "/MDd" "/MTd" CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG}")
-			SET(Boost_USE_STATIC_RUNTIME ON)
-		endif(${STATIC_RUNTIME})
+
+		# lccgen 作为独立工具，强制使用静态CRT（CMake 3.15+方式，自动应用到所有目标）
+		set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>" CACHE STRING "MSVC runtime library" FORCE)
+		message(STATUS "lccgen: Using static CRT (/MT for Release, /MTd for Debug)")
+
 		add_definitions("/D _CRT_SECURE_NO_WARNINGS")
 		list(APPEND EXTERNAL_LIBS "bcrypt" "crypt32" "ws2_32" "iphlpapi")
 	else(MSVC)
@@ -103,14 +121,55 @@ if(WIN32 AND "x${CMAKE_CXX_COMPILER_ARCHITECTURE_ID}" STREQUAL "x")
     message(STATUS "Compiler architecture: ${CMAKE_CXX_COMPILER_ARCHITECTURE_ID}")
 endif()
 
-SET( Boost_USE_STATIC_LIBS OFF )
+SET( Boost_USE_STATIC_LIBS ON )  # 静态链接 Boost 库本身
+
+# 配置 Boost 运行时匹配
+if(MSVC)
+    # lccgen 为独立工具，使用静态 CRT (/MT) 编译的 Boost 库（与 x64-windows-static 匹配）
+    SET(Boost_USE_STATIC_RUNTIME ON)
+
+    # 禁用 Boost 自动链接机制
+    add_definitions(-DBOOST_ALL_NO_LIB)
+    # 显示链接诊断信息
+    add_definitions(-DBOOST_LIB_DIAGNOSTIC)
+endif()
+
+# lccgen: 强制使用 vcpkg 的静态 Boost 库（x64-windows-static triplet，包含 /MT CRT）
+if(MSVC)
+  # 从 CMAKE_TOOLCHAIN_FILE 推导 vcpkg 根目录（重用之前的变量）
+  if(VCPKG_ROOT_TEMP)
+    set(BOOST_ROOT "${VCPKG_ROOT_TEMP}/installed/x64-windows-static")
+    set(Boost_NO_SYSTEM_PATHS ON)
+    message(STATUS "lccgen: Derived vcpkg root from toolchain: ${VCPKG_ROOT_TEMP}")
+    message(STATUS "lccgen: Using static Boost from ${BOOST_ROOT}")
+  elseif(CMAKE_TOOLCHAIN_FILE AND CMAKE_TOOLCHAIN_FILE MATCHES "vcpkg.cmake")
+    get_filename_component(VCPKG_ROOT "${CMAKE_TOOLCHAIN_FILE}" DIRECTORY)
+    get_filename_component(VCPKG_ROOT "${VCPKG_ROOT}" DIRECTORY)
+    get_filename_component(VCPKG_ROOT "${VCPKG_ROOT}" DIRECTORY)
+
+    set(BOOST_ROOT "${VCPKG_ROOT}/installed/x64-windows-static")
+    set(Boost_NO_SYSTEM_PATHS ON)
+    message(STATUS "lccgen: Derived vcpkg root from toolchain: ${VCPKG_ROOT}")
+    message(STATUS "lccgen: Using static Boost from ${BOOST_ROOT}")
+  elseif(DEFINED ENV{VCPKG_ROOT})
+    # 备用：使用环境变量
+    set(BOOST_ROOT "$ENV{VCPKG_ROOT}/installed/x64-windows-static")
+    set(Boost_NO_SYSTEM_PATHS ON)
+    message(STATUS "lccgen: Using vcpkg static Boost from ${BOOST_ROOT}")
+  elseif(EXISTS "E:/vcpkg/installed/x64-windows-static")
+    # 备用：硬编码路径
+    set(BOOST_ROOT "E:/vcpkg/installed/x64-windows-static")
+    set(Boost_NO_SYSTEM_PATHS ON)
+    message(STATUS "lccgen: Using vcpkg static Boost from ${BOOST_ROOT}")
+  endif()
+endif()
+
 find_package(Boost REQUIRED COMPONENTS date_time filesystem program_options system unit_test_framework)
 
-# 使用动态链接 Boost 时需要定义此宏
-set_property(DIRECTORY APPEND PROPERTY COMPILE_DEFINITIONS $<$<CONFIG:Debug>:BOOST_TEST_DYN_LINK>)
-set_property(DIRECTORY APPEND PROPERTY COMPILE_DEFINITIONS $<$<CONFIG:Release>:BOOST_TEST_DYN_LINK>)
-add_definitions(-DBOOST_ALL_NO_LIB) #Disable Boost Microsoft magic, all dependencies are handled by cmake
-add_definitions(-DBOOST_LIB_DIAGNOSTIC) #Check it is really disabled
+if(Boost_FOUND)
+    message(STATUS "Found Boost (static libs): ${Boost_VERSION}")
+endif()
+
 include_directories(${Boost_INCLUDE_DIRS}) 
 
 configure_file (
