@@ -1,4 +1,4 @@
-﻿cmake_minimum_required(VERSION 3.10 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.6 FATAL_ERROR)
 
 SET(CMAKE_DISABLE_SOURCE_CHANGES ON)
 SET(CMAKE_DISABLE_IN_SOURCE_BUILD ON)
@@ -9,15 +9,21 @@ if(POLICY CMP0167)
   cmake_policy(SET CMP0167 NEW)
 endif()
 
-# CMP0144: find_package 使用大写 <PACKAGENAME>_ROOT 变量
-if(POLICY CMP0144)
-  cmake_policy(SET CMP0144 NEW)
+cmake_policy(SET CMP0048 NEW)
+
+# 统一配置 MSVC 运行时库 - 必须在 project() 之前设置
+# 只在未定义时设置（继承父项目或licensecc主项目的配置）
+if(NOT DEFINED CMAKE_MSVC_RUNTIME_LIBRARY)
+  if(STATIC_RUNTIME)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+  else()
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+  endif()
 endif()
 
-cmake_policy(SET CMP0048 NEW)
 project (lccgen
 	VERSION 2.0.0
-	DESCRIPTION "License generator for licensecc" 
+	DESCRIPTION "License generator for licensecc"
 	LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 11)
@@ -77,15 +83,16 @@ else(UNIX) #windows and linux crosscompiling for windows target
 		include(target_arch)
 		target_architecture( TARGET_ARCHITECTURE )
 		message(STATUS "architecture detected: ${TARGET_ARCHITECTURE}")
-		
-		#Boost > 3.15 handle the /MD flag more nicely than this
-		if(${STATIC_RUNTIME})
-			string(REPLACE "/MD" "/MT" CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE}")
-			string(REPLACE "/MD" "/MT" CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE}")
-			string(REPLACE "/MDd" "/MTd" CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG}")
-			string(REPLACE "/MDd" "/MTd" CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG}")
-			SET(Boost_USE_STATIC_RUNTIME ON)
-		endif(${STATIC_RUNTIME})
+
+		# Boost 始终使用静态链接（.lib文件），但根据CRT类型选择对应的variant
+		# STATIC_RUNTIME=ON: 使用 /MT 编译的 Boost 静态库
+		# STATIC_RUNTIME=OFF: 使用 /MD 编译的 Boost 静态库
+		if(STATIC_RUNTIME)
+		  SET(Boost_USE_STATIC_RUNTIME ON)
+		else()
+		  SET(Boost_USE_STATIC_RUNTIME OFF)
+		endif()
+
 		add_definitions("/D _CRT_SECURE_NO_WARNINGS")
 		list(APPEND EXTERNAL_LIBS "bcrypt" "crypt32" "ws2_32" "iphlpapi")
 	else(MSVC)
@@ -108,14 +115,14 @@ if(WIN32 AND "x${CMAKE_CXX_COMPILER_ARCHITECTURE_ID}" STREQUAL "x")
     message(STATUS "Compiler architecture: ${CMAKE_CXX_COMPILER_ARCHITECTURE_ID}")
 endif()
 
+# Boost 使用动态库文件（.dll）
 SET( Boost_USE_STATIC_LIBS OFF )
 find_package(Boost REQUIRED COMPONENTS date_time filesystem program_options system unit_test_framework)
 
-# 使用动态链接 Boost 时需要定义此宏
-set_property(DIRECTORY APPEND PROPERTY COMPILE_DEFINITIONS $<$<CONFIG:Debug>:BOOST_TEST_DYN_LINK>)
-set_property(DIRECTORY APPEND PROPERTY COMPILE_DEFINITIONS $<$<CONFIG:Release>:BOOST_TEST_DYN_LINK>)
-add_definitions(-DBOOST_ALL_NO_LIB) #Disable Boost Microsoft magic, all dependencies are handled by cmake
-add_definitions(-DBOOST_LIB_DIAGNOSTIC) #Check it is really disabled
+# 使用动态链接 Boost 时需要 BOOST_TEST_DYN_LINK 和 BOOST_ALL_DYN_LINK 宏
+add_definitions(-DBOOST_ALL_DYN_LINK)       # 动态链接所有Boost库
+add_definitions(-DBOOST_ALL_NO_LIB)         # 禁用 Boost 的 Microsoft magic，所有依赖由 cmake 处理
+add_definitions(-DBOOST_LIB_DIAGNOSTIC)     # 检查是否真的禁用了自动链接
 include_directories(${Boost_INCLUDE_DIRS}) 
 
 configure_file (
